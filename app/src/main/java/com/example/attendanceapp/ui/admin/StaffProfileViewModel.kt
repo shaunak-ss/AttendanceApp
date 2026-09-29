@@ -41,4 +41,11 @@ class StaffProfileViewModel(
                 .collect { _uiState.value = it }
         }
     }
+
+    fun deleteStaff(onDeleted: () -> Unit) {
+        viewModelScope.launch {
+            staffRepository.deleteStaff(staffId)
+            onDeleted()
+        }
+    }
 }

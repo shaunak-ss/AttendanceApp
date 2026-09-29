@@ -18,8 +18,17 @@ interface StaffDao {
     @Query("SELECT * FROM staff WHERE id = :staffId")
     suspend fun getStaffById(staffId: Long): StaffEntity?
 
-    @Query("SELECT * FROM staff WHERE employeeId = :employeeId")
+    @Query("SELECT * FROM staff WHERE LOWER(employeeId) = LOWER(:employeeId)")
     suspend fun getStaffByEmployeeId(employeeId: String): StaffEntity?
+
+    @Query("SELECT * FROM staff WHERE LOWER(employeeId) = LOWER(:identifier) OR LOWER(name) = LOWER(:identifier) LIMIT 1")
+    suspend fun getStaffByIdentifier(identifier: String): StaffEntity?
+
+    @Query("SELECT * FROM staff ORDER BY id ASC")
+    suspend fun getAllStaffList(): List<StaffEntity>
+
+    @Query("DELETE FROM staff WHERE id = :staffId")
+    suspend fun deleteStaff(staffId: Long)
 
     @Insert
     suspend fun insertEnrolledFace(face: EnrolledFaceEntity)

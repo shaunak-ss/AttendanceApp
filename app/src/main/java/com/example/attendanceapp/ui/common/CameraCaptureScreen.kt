@@ -1,10 +1,17 @@
 package com.example.attendanceapp.ui.common
 
 import android.Manifest
+import android.app.Activity
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
+import android.net.Uri
+import android.provider.Settings
+import android.util.Log
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -15,17 +22,17 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -42,6 +49,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.Canvas
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import java.util.concurrent.Executors
@@ -55,7 +64,9 @@ fun CameraCaptureScreen(
     instructionText: String,
     isProcessing: Boolean,
     onCaptured: (Bitmap) -> Unit,
-    onCancel: () -> Unit
+    onCancel: () -> Unit,
+    requireLocationPermission: Boolean = false,
+    onLocationPermissionAvailable: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -66,29 +77,110 @@ fun CameraCaptureScreen(
                 PackageManager.PERMISSION_GRANTED
         )
     }
-    val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
-    ) { granted -> hasCameraPermission = granted }
+    var hasLocationPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
+        )
+    }
+    // False until the permission dialog has been shown at least once, so we don't show the
+    // "denied" messaging before the user has had a chance to respond.
+    var permissionRequested by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        if (!hasCameraPermission) permissionLauncher.launch(Manifest.permission.CAMERA)
+    val permissionsLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        hasCameraPermission = permissions[Manifest.permission.CAMERA] ?: hasCameraPermission
+        hasLocationPermission = (permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true) ||
+                (permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true) ||
+                hasLocationPermission
+        permissionRequested = true
     }
 
-    if (!hasCameraPermission) {
+    fun requestMissingPermissions() {
+        val permissionsToRequest = mutableListOf<String>()
+        if (!hasCameraPermission) permissionsToRequest.add(Manifest.permission.CAMERA)
+        if (requireLocationPermission && !hasLocationPermission) {
+            permissionsToRequest.add(Manifest.permission.ACCESS_FINE_LOCATION)
+            permissionsToRequest.add(Manifest.permission.ACCESS_COARSE_LOCATION)
+        }
+        if (permissionsToRequest.isNotEmpty()) {
+            permissionsLauncher.launch(permissionsToRequest.toTypedArray())
+        }
+    }
+
+    LaunchedEffect(Unit) { requestMissingPermissions() }
+
+    // Fires the instant location permission is confirmed available — immediately if it was
+    // already granted, or right after the user grants it via the dialog above. Starting the
+    // caller's location acquisition here (rather than earlier) avoids racing ahead of the grant.
+    LaunchedEffect(hasLocationPermission) {
+        if (hasLocationPermission) onLocationPermissionAvailable()
+    }
+
+    val permissionsSatisfied = hasCameraPermission && (!requireLocationPermission || hasLocationPermission)
+
+    if (!permissionsSatisfied) {
+        if (!permissionRequested) {
+            // Waiting on the first system prompt(s); nothing to show yet.
+            return
+        }
+
+        val activity = context as? Activity
+        val missingPermissions = buildList {
+            if (!hasCameraPermission) add(Manifest.permission.CAMERA)
+            if (requireLocationPermission && !hasLocationPermission) add(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+        val permanentlyDenied = activity != null && missingPermissions.isNotEmpty() &&
+            missingPermissions.none { ActivityCompat.shouldShowRequestPermissionRationale(activity, it) }
+
+        val message = if (requireLocationPermission) {
+            "Camera and location permissions are both required to mark attendance. " +
+                "Please grant both permissions to continue."
+        } else {
+            "Camera permission is required to capture a selfie."
+        }
+
         Column(
             modifier = Modifier.fillMaxSize().padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center
         ) {
-            Text("Camera permission is required to capture a selfie.")
-            Button(onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) }) {
-                Text("Grant permission")
+            Text(message, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            androidx.compose.foundation.layout.Spacer(Modifier.padding(8.dp))
+            if (permanentlyDenied) {
+                Button(onClick = {
+                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = Uri.fromParts("package", context.packageName, null)
+                    }
+                    context.startActivity(intent)
+                }) {
+                    Text("Open Settings")
+                }
+            } else {
+                Button(onClick = { requestMissingPermissions() }) {
+                    Text("Grant permissions")
+                }
             }
+            androidx.compose.foundation.layout.Spacer(Modifier.padding(4.dp))
+            Text(
+                "Cancel",
+                modifier = Modifier.padding(4.dp).clickableText(onCancel)
+            )
         }
         return
     }
 
     val imageCapture = remember { ImageCapture.Builder().build() }
     val executor = remember { Executors.newSingleThreadExecutor() }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            executor.shutdown()
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         AndroidViewCameraPreview(
@@ -107,6 +199,20 @@ fun CameraCaptureScreen(
                 topLeft = androidx.compose.ui.geometry.Offset(left, top),
                 size = Size(ovalWidth, ovalHeight),
                 style = Stroke(width = 4.dp.toPx())
+            )
+        }
+
+        // Top-left Back Arrow Button
+        IconButton(
+            onClick = onCancel,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(top = 24.dp, start = 12.dp)
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "Back",
+                tint = Color.White
             )
         }
 
@@ -152,22 +258,42 @@ private fun AndroidViewCameraPreview(
     lifecycleOwner: androidx.lifecycle.LifecycleOwner
 ) {
     val context = LocalContext.current
-    androidx.compose.ui.viewinterop.AndroidView(
+
+    DisposableEffect(lifecycleOwner) {
+        onDispose {
+            try {
+                val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+                if (cameraProviderFuture.isDone) {
+                    cameraProviderFuture.get().unbindAll()
+                }
+            } catch (e: Exception) {
+                Log.e("CameraCaptureScreen", "Error unbinding camera on dispose", e)
+            }
+        }
+    }
+
+    AndroidView(
         modifier = Modifier.fillMaxSize(),
         factory = { ctx ->
-            val previewView = PreviewView(ctx)
+            val previewView = PreviewView(ctx).apply {
+                implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+            }
             val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
             cameraProviderFuture.addListener({
                 val cameraProvider = cameraProviderFuture.get()
                 val preview = Preview.Builder().build().also {
                     it.surfaceProvider = previewView.surfaceProvider
                 }
-                val selector = CameraSelector.DEFAULT_FRONT_CAMERA
+                val selector = when {
+                    cameraProvider.hasCamera(CameraSelector.DEFAULT_FRONT_CAMERA) -> CameraSelector.DEFAULT_FRONT_CAMERA
+                    cameraProvider.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA) -> CameraSelector.DEFAULT_BACK_CAMERA
+                    else -> CameraSelector.DEFAULT_FRONT_CAMERA
+                }
                 try {
                     cameraProvider.unbindAll()
                     cameraProvider.bindToLifecycle(lifecycleOwner, selector, preview, imageCapture)
                 } catch (e: Exception) {
-                    // No usable camera bound; preview stays blank and capture will simply fail.
+                    Log.e("CameraCaptureScreen", "Error binding camera use cases", e)
                 }
             }, ContextCompat.getMainExecutor(ctx))
             previewView

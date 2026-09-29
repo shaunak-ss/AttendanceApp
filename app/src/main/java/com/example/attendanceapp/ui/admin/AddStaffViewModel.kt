@@ -18,13 +18,28 @@ class AddStaffViewModel(private val staffRepository: StaffRepository) : ViewMode
     val uiState: StateFlow<AddStaffUiState> = _uiState.asStateFlow()
 
     fun addStaff(name: String, employeeId: String) {
-        if (name.isBlank() || employeeId.isBlank()) {
+        val trimmedName = name.trim()
+        val trimmedEmpId = employeeId.trim()
+        if (trimmedName.isBlank() || trimmedEmpId.isBlank()) {
             _uiState.value = _uiState.value.copy(errorMessage = "Name and employee ID are required")
             return
         }
         viewModelScope.launch {
-            val id = staffRepository.addStaff(name.trim(), employeeId.trim())
-            _uiState.value = _uiState.value.copy(createdStaffId = id, errorMessage = null)
+            try {
+                val existing = staffRepository.getStaffByEmployeeId(trimmedEmpId)
+                if (existing != null) {
+                    _uiState.value = _uiState.value.copy(
+                        errorMessage = "An employee with Employee ID '$trimmedEmpId' already exists"
+                    )
+                    return@launch
+                }
+                val id = staffRepository.addStaff(trimmedName, trimmedEmpId)
+                _uiState.value = _uiState.value.copy(createdStaffId = id, errorMessage = null)
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    errorMessage = e.message ?: "Failed to add staff"
+                )
+            }
         }
     }
 }

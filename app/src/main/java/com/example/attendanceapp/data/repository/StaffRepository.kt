@@ -1,11 +1,12 @@
 package com.example.attendanceapp.data.repository
 
 import android.graphics.Bitmap
+import com.example.attendanceapp.data.db.AttendanceDao
 import com.example.attendanceapp.data.db.StaffDao
 import com.example.attendanceapp.data.entity.EnrolledFaceEntity
 import com.example.attendanceapp.data.entity.StaffEntity
 import com.example.attendanceapp.data.face.FaceCaptureResult
-import com.example.attendanceapp.data.face.FaceLandmarkExtractor
+import com.example.attendanceapp.data.face.FaceEmbeddingExtractor
 import com.example.attendanceapp.data.face.FaceMatcher
 import com.example.attendanceapp.data.storage.ImageStorage
 import kotlinx.coroutines.flow.Flow
@@ -17,8 +18,9 @@ sealed class EnrolmentResult {
 
 class StaffRepository(
     private val staffDao: StaffDao,
+    private val attendanceDao: AttendanceDao,
     private val imageStorage: ImageStorage,
-    private val faceExtractor: FaceLandmarkExtractor
+    private val faceExtractor: FaceEmbeddingExtractor
 ) {
     fun observeAllStaff(): Flow<List<StaffEntity>> = staffDao.observeAllStaff()
 
@@ -27,10 +29,25 @@ class StaffRepository(
 
     suspend fun getStaff(staffId: Long): StaffEntity? = staffDao.getStaffById(staffId)
 
-    suspend fun addStaff(name: String, employeeId: String): Long =
-        staffDao.insertStaff(StaffEntity(name = name, employeeId = employeeId))
+    suspend fun getStaffByEmployeeId(employeeId: String): StaffEntity? =
+        staffDao.getStaffByEmployeeId(employeeId.trim())
 
-    /** Runs ML Kit on each captured selfie, averages the resulting vectors, and stores them. */
+    suspend fun addStaff(name: String, employeeId: String): Long {
+        val trimmedEmpId = employeeId.trim()
+        val existing = staffDao.getStaffByEmployeeId(trimmedEmpId)
+        if (existing != null) {
+            throw IllegalArgumentException("An employee with Employee ID '$trimmedEmpId' already exists.")
+        }
+        return staffDao.insertStaff(StaffEntity(name = name.trim(), employeeId = trimmedEmpId))
+    }
+
+    suspend fun deleteStaff(staffId: Long) {
+        staffDao.deleteEnrolledFaceForStaff(staffId)
+        attendanceDao.deleteAttendanceForStaff(staffId)
+        staffDao.deleteStaff(staffId)
+    }
+
+    /** Runs face detection + embedding on each captured selfie, averages the embeddings, and stores them. */
     suspend fun enrolFace(staffId: Long, captures: List<Bitmap>): EnrolmentResult {
         val vectors = mutableListOf<FloatArray>()
         for (bitmap in captures) {

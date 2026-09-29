@@ -34,6 +34,14 @@ android {
     buildFeatures {
         compose = true
     }
+    androidResources {
+        noCompress += "tflite"
+    }
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
 }
 
 dependencies {
@@ -55,6 +63,7 @@ dependencies {
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
     implementation(libs.mlkit.face.detection)
+    implementation(libs.tensorflow.lite)
     implementation(libs.play.services.location)
     implementation(libs.kotlinx.coroutines.play.services)
     testImplementation(libs.junit)

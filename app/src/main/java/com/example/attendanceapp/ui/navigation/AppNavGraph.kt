@@ -34,7 +34,7 @@ fun AppNavGraph(container: AppContainer) {
         composable(Routes.LOGIN) {
             val viewModel: LoginViewModel = viewModel(
                 factory = ViewModelFactory {
-                    LoginViewModel(container.authRepository, container.staffRepository.observeAllStaff())
+                    LoginViewModel(container.authRepository)
                 }
             )
             LoginScreen(
@@ -60,7 +60,12 @@ fun AppNavGraph(container: AppContainer) {
             StaffListScreen(
                 viewModel = viewModel,
                 onAddStaff = { navController.navigate(Routes.ADD_STAFF) },
-                onOpenStaff = { staffId -> navController.navigate(Routes.staffProfile(staffId)) }
+                onOpenStaff = { staffId -> navController.navigate(Routes.staffProfile(staffId)) },
+                onLogout = {
+                    navController.navigate(Routes.LOGIN) {
+                        popUpTo(0) { inclusive = true }
+                    }
+                }
             )
         }
 
@@ -74,7 +79,8 @@ fun AppNavGraph(container: AppContainer) {
                     navController.navigate(Routes.staffProfile(staffId)) {
                         popUpTo(Routes.STAFF_LIST)
                     }
-                }
+                },
+                onBack = { navController.popBackStack() }
             )
         }
 
@@ -90,7 +96,8 @@ fun AppNavGraph(container: AppContainer) {
             )
             StaffProfileScreen(
                 viewModel = viewModel,
-                onEnrolFace = { navController.navigate(Routes.enrolFace(staffId)) }
+                onEnrolFace = { navController.navigate(Routes.enrolFace(staffId)) },
+                onBack = { navController.popBackStack() }
             )
         }
 
@@ -104,8 +111,8 @@ fun AppNavGraph(container: AppContainer) {
             )
             EnrolFaceScreen(
                 viewModel = viewModel,
-                onDone = { navController.popBackStack() },
-                onCancel = { navController.popBackStack() }
+                onDone = { navController.popBackStack(Routes.STAFF_LIST, inclusive = false) },
+                onCancel = { navController.popBackStack(Routes.STAFF_LIST, inclusive = false) }
             )
         }
 
@@ -124,7 +131,12 @@ fun AppNavGraph(container: AppContainer) {
             StaffHomeScreen(
                 displayName = displayName,
                 viewModel = viewModel,
-                onMarkAttendance = { navController.navigate(Routes.markAttendance(staffId)) }
+                onMarkAttendance = { navController.navigate(Routes.markAttendance(staffId)) },
+                onLogout = {
+                    navController.navigate(Routes.LOGIN) {
+                        popUpTo(0) { inclusive = true }
+                    }
+                }
             )
         }
 

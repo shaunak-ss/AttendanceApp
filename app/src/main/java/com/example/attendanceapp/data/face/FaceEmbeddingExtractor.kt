@@ -1,17 +1,18 @@
 package com.example.attendanceapp.data.face
 
+import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Rect
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.Face
 import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetector
 import com.google.mlkit.vision.face.FaceDetectorOptions
-import com.google.mlkit.vision.face.FaceLandmark
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
-import kotlin.math.sqrt
+import kotlin.math.abs
 
-/** Outcome of running ML Kit on a captured frame, before any matching decision is made. */
+/** Outcome of running face detection + embedding on a captured frame, before any match decision. */
 sealed class FaceCaptureResult {
     data class Success(val vector: FloatArray, val face: Face) : FaceCaptureResult()
     data object NoFaceDetected : FaceCaptureResult()
@@ -22,11 +23,13 @@ sealed class FaceCaptureResult {
 }
 
 /**
- * Wraps ML Kit face detection and turns detected landmarks into a normalized geometric
- * feature vector (pairwise landmark distances divided by inter-ocular distance, so the
- * vector is roughly scale/translation invariant).
+ * Uses ML Kit to detect a face, gate on basic liveness/framing quality (eyes open, head frontal),
+ * then crops the face and runs it through [FaceEmbedder] to get an identity embedding vector
+ * that [FaceMatcher] compares against the enrolled embedding.
  */
-class FaceLandmarkExtractor {
+class FaceEmbeddingExtractor(context: Context) {
+
+    private val embedder = FaceEmbedder(context.applicationContext)
 
     private val detector: FaceDetector by lazy {
         val options = FaceDetectorOptions.Builder()
@@ -55,52 +58,23 @@ class FaceLandmarkExtractor {
         val leftEyeOpen = face.leftEyeOpenProbability ?: 1f
         val rightEyeOpen = face.rightEyeOpenProbability ?: 1f
         if (leftEyeOpen < 0.4f || rightEyeOpen < 0.4f) return FaceCaptureResult.EyesClosed
-        if (kotlin.math.abs(face.headEulerAngleY) > 20f || kotlin.math.abs(face.headEulerAngleZ) > 20f) {
+        if (abs(face.headEulerAngleY) > 20f || abs(face.headEulerAngleZ) > 20f) {
             return FaceCaptureResult.HeadNotFrontal
         }
 
-        val vector = buildVector(face) ?: return FaceCaptureResult.LandmarksMissing
+        val crop = cropFace(bitmap, face.boundingBox) ?: return FaceCaptureResult.LandmarksMissing
+        val vector = embedder.embed(crop)
         return FaceCaptureResult.Success(vector, face)
     }
 
-    private fun buildVector(face: Face): FloatArray? {
-        val landmarkTypes = intArrayOf(
-            FaceLandmark.LEFT_EYE,
-            FaceLandmark.RIGHT_EYE,
-            FaceLandmark.NOSE_BASE,
-            FaceLandmark.MOUTH_LEFT,
-            FaceLandmark.MOUTH_RIGHT,
-            FaceLandmark.MOUTH_BOTTOM,
-            FaceLandmark.LEFT_EAR,
-            FaceLandmark.RIGHT_EAR,
-            FaceLandmark.LEFT_CHEEK,
-            FaceLandmark.RIGHT_CHEEK
-        )
-
-        val points = landmarkTypes.map { type ->
-            face.getLandmark(type)?.position ?: return null
-        }
-
-        val leftEye = points[0]
-        val rightEye = points[1]
-        val interOcularDistance = distance(leftEye.x, leftEye.y, rightEye.x, rightEye.y)
-        if (interOcularDistance < 1e-3f) return null
-
-        // All pairwise distances between the chosen landmarks, normalized by inter-ocular
-        // distance so the vector doesn't depend on how close the face is to the camera.
-        val distances = mutableListOf<Float>()
-        for (i in points.indices) {
-            for (j in i + 1 until points.size) {
-                val d = distance(points[i].x, points[i].y, points[j].x, points[j].y)
-                distances.add(d / interOcularDistance)
-            }
-        }
-        return distances.toFloatArray()
-    }
-
-    private fun distance(x1: Float, y1: Float, x2: Float, y2: Float): Float {
-        val dx = x2 - x1
-        val dy = y2 - y1
-        return sqrt(dx * dx + dy * dy)
+    private fun cropFace(bitmap: Bitmap, box: Rect): Bitmap? {
+        val left = box.left.coerceIn(0, bitmap.width - 1)
+        val top = box.top.coerceIn(0, bitmap.height - 1)
+        val right = box.right.coerceIn(left + 1, bitmap.width)
+        val bottom = box.bottom.coerceIn(top + 1, bitmap.height)
+        val width = right - left
+        val height = bottom - top
+        if (width <= 0 || height <= 0) return null
+        return Bitmap.createBitmap(bitmap, left, top, width, height)
     }
 }

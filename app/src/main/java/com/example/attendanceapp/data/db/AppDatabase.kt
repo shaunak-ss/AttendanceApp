@@ -10,7 +10,7 @@ import com.example.attendanceapp.data.entity.StaffEntity
 
 @Database(
     entities = [StaffEntity::class, EnrolledFaceEntity::class, AttendanceRecordEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -26,7 +26,8 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "attendance_app.db"
-                ).build().also { instance = it }
+                ).fallbackToDestructiveMigration(dropAllTables = true)
+                 .build().also { instance = it }
             }
     }
 }

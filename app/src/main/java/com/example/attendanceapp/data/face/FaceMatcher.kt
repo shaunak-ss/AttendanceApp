@@ -5,11 +5,14 @@ import kotlin.math.sqrt
 object FaceMatcher {
 
     /**
-     * Below this normalized Euclidean distance the live capture is considered a match.
-     * Tuned empirically against the landmark-distance vector produced by [FaceLandmarkExtractor];
-     * lower = stricter. Exposed as a single constant so it's easy to retune during testing.
+     * Minimum cosine similarity between two L2-normalized MobileFaceNet embeddings (see
+     * [FaceEmbedder]) for the live capture to count as the enrolled person. MobileFaceNet
+     * (ArcFace-trained) typically separates same-identity from different-identity pairs somewhere
+     * around 0.5-0.7 cosine similarity; start here and retune against real enrolment/attendance
+     * captures — raise it if different people are still matching, lower it if the enrolled person
+     * is being rejected too often.
      */
-    const val MATCH_THRESHOLD = 0.18f
+    const val MATCH_THRESHOLD = 0.65f
 
     fun vectorToString(vector: FloatArray): String = vector.joinToString(",")
 
@@ -24,22 +27,34 @@ object FaceMatcher {
             for (i in 0 until size) result[i] += v[i]
         }
         for (i in 0 until size) result[i] /= vectors.size
-        return result
+        return l2Normalize(result)
     }
 
-    /** Returns (isMatch, distance) — smaller distance means a closer match. */
+    /** Returns (isMatch, similarity) — cosine similarity in [-1,1]; higher means a closer match. */
     fun match(enrolled: FloatArray, live: FloatArray): Pair<Boolean, Float> {
-        val distance = euclideanDistance(enrolled, live)
-        return (distance <= MATCH_THRESHOLD) to distance
+        val similarity = cosineSimilarity(enrolled, live)
+        return (similarity >= MATCH_THRESHOLD) to similarity
     }
 
-    private fun euclideanDistance(a: FloatArray, b: FloatArray): Float {
-        require(a.size == b.size) { "Feature vectors must be the same length to compare." }
-        var sum = 0f
+    private fun cosineSimilarity(a: FloatArray, b: FloatArray): Float {
+        require(a.size == b.size) { "Embeddings must be the same length to compare." }
+        var dot = 0f
+        var normA = 0f
+        var normB = 0f
         for (i in a.indices) {
-            val diff = a[i] - b[i]
-            sum += diff * diff
+            dot += a[i] * b[i]
+            normA += a[i] * a[i]
+            normB += b[i] * b[i]
         }
-        return sqrt(sum / a.size)
+        if (normA <= 0f || normB <= 0f) return -1f
+        return dot / (sqrt(normA) * sqrt(normB))
+    }
+
+    private fun l2Normalize(vector: FloatArray): FloatArray {
+        var norm = 0f
+        for (value in vector) norm += value * value
+        norm = sqrt(norm)
+        if (norm < 1e-6f) return vector
+        return FloatArray(vector.size) { vector[it] / norm }
     }
 }

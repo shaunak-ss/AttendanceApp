@@ -32,12 +32,23 @@ fun MarkAttendanceScreen(
     val uiState by viewModel.uiState.collectAsState()
 
     when (uiState.step) {
+        MarkAttendanceStep.CHECKING -> {
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                androidx.compose.material3.CircularProgressIndicator()
+            }
+        }
         MarkAttendanceStep.CAPTURING, MarkAttendanceStep.PROCESSING -> {
             com.example.attendanceapp.ui.common.CameraCaptureScreen(
                 instructionText = "Center your face and capture a selfie to mark attendance.",
                 isProcessing = uiState.step == MarkAttendanceStep.PROCESSING,
                 onCaptured = viewModel::onSelfieCaptured,
-                onCancel = onFinished
+                onCancel = onFinished,
+                requireLocationPermission = true,
+                onLocationPermissionAvailable = viewModel::ensureLocationAcquisitionStarted
             )
         }
         MarkAttendanceStep.MATCHED -> {
@@ -55,6 +66,17 @@ fun MarkAttendanceScreen(
                 title = "No match",
                 subtitle = uiState.message ?: "Please try again.",
                 onDone = viewModel::retry,
+                buttonLabel = "Try again",
+                autoDismiss = false
+            )
+        }
+        MarkAttendanceStep.ALREADY_MARKED -> {
+            ResultState(
+                success = true,
+                title = "Already marked",
+                subtitle = uiState.message ?: "You already marked attendance today.",
+                onDone = onFinished,
+                buttonLabel = "OK",
                 autoDismiss = false
             )
         }
@@ -67,7 +89,8 @@ private fun ResultState(
     title: String,
     subtitle: String,
     onDone: () -> Unit,
-    autoDismiss: Boolean
+    autoDismiss: Boolean,
+    buttonLabel: String = "Try again"
 ) {
     val scale = androidx.compose.runtime.remember { Animatable(0.6f) }
     LaunchedEffect(Unit) {
@@ -98,7 +121,7 @@ private fun ResultState(
         if (!autoDismiss) {
             androidx.compose.foundation.layout.Spacer(Modifier.padding(16.dp))
             Button(onClick = onDone) {
-                Text("Try again")
+                Text(buttonLabel)
             }
         }
     }
